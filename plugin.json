@@ -16,6 +16,7 @@
     "HeightOffset": 60,
     "ShowBackground": true,
     "BackgroundColor": "Black",
+    "ShowInHideout": false,
     "BuffSettings": []
   }
 }

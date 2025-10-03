@@ -66,6 +66,9 @@ namespace ShowBuffs_PoE2
         [Menu("Background Color")]
         public ColorNode BackgroundColor { get; set; } = new ColorNode(Color.FromArgb(128, Color.Black));
 
+        [Menu("Show in Hideout", "Show buffs in hideout")]
+        public ToggleNode ShowInHideout { get; set; } = new ToggleNode(false);
+
         [Menu("Buff Settings")]
         public EmptyNode BuffsHeader { get; set; } = new EmptyNode();
 
@@ -319,6 +322,10 @@ namespace ShowBuffs_PoE2
         public override void Render()
         {
             if (!Settings.Enable) return;
+
+            // Проверяем, нужно ли показывать в хайдауте
+            if (!Settings.ShowInHideout && GameController.Area.CurrentArea.IsHideout)
+                return;
 
             try
             {

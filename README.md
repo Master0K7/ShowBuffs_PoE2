@@ -74,6 +74,7 @@ Track negative effects on your character:
 - **Font Size** - Adjust text size (0.5x to 3.0x)
 - **Height Offset** - Distance above character head
 - **Show Background** - Semi-transparent background for better visibility
+- **Show in Hideout** - Display buffs in hideout (disabled by default)
 
 ### Buff Settings
 Each buff can be configured with:
@@ -280,6 +281,7 @@ This plugin will help you stay informed about your buffs and make better decisio
 - **Размер шрифта** - Настройка размера текста (0.5x до 3.0x)
 - **Смещение по высоте** - Расстояние над головой персонажа
 - **Показать фон** - Полупрозрачный фон для лучшей видимости
+- **Показывать в хайдауте** - Отображать баффы в хайдауте (по умолчанию отключено)
 
 ### Настройки баффов
 Каждый бафф можно настроить:
