@@ -1,0 +1,21 @@
+{
+  "Name": "ShowBuffs_PoE2",
+  "DisplayName": "ShowBuffs PoE2",
+  "Description": "Displays Headhunter stacks, buffs and debuffs with positioning and dynamic management. Supports English/Russian interface.",
+  "Version": "1.0.0",
+  "Author": "Master0K",
+  "MainAssembly": "ShowBuffs_PoE2.dll",
+  "MainClass": "ShowBuffs_PoE2.ShowBuffs_PoE2",
+  "Dependencies": [
+    "ExileCore2"
+  ],
+  "Settings": {
+    "Enable": true,
+    "UseEnglish": true,
+    "FontSize": 1.0,
+    "HeightOffset": 60,
+    "ShowBackground": true,
+    "BackgroundColor": "Black",
+    "BuffSettings": []
+  }
+}
