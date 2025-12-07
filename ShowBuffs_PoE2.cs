@@ -69,6 +69,12 @@ namespace ShowBuffs_PoE2
         [Menu("Show in Hideout", "Show buffs in hideout")]
         public ToggleNode ShowInHideout { get; set; } = new ToggleNode(false);
 
+        [Menu("Show All Buffs Window", "Open separate window with search, sort and all detected buffs with Type values")]
+        public ToggleNode ShowAllBuffsWindow { get; set; } = new ToggleNode(false);
+    
+        [Menu("Freeze Buff List", "Stop updating detected buffs list (useful for catching short-duration buffs)")]
+        public ToggleNode FreezeBuffList { get; set; } = new ToggleNode(false);
+
         [Menu("Buff Settings")]
         public EmptyNode BuffsHeader { get; set; } = new EmptyNode();
 
@@ -111,6 +117,45 @@ namespace ShowBuffs_PoE2
 
     public class ShowBuffs_PoE2 : BaseSettingsPlugin<Settings>
     {
+        private List<Buff> _detectedBuffs = new List<Buff>();
+        private HashSet<string> _lastKnownActiveBuffNames = new HashSet<string>();
+        private string _buffSearchFilter = "";
+        private int _buffSortMode = 0; // 0 = by name, 1 = by stacks, 2 = by type
+
+        // Known debuffs and ground effects (lowercase)
+        private static readonly HashSet<string> KnownDebuffsAndGroundEffects = new HashSet<string>
+        {
+            // Curses
+            "vulnerability", "elemental_weakness", "temporal_chains", "enfeeble", "despair",
+            "frostbite", "flammability", "conductivity", "punishment", "warlords_mark",
+            "poachers_mark", "assassins_mark", "sniper_mark",
+            
+            // Marks & Ailments
+            "bleed", "poison", "ignite", "freeze", "chill", "shock", "corrupted_blood",
+            "burning", "bleeding", "poisoned", "shocked", "chilled", "frozen",
+            
+            // Debuffs
+            "hindered", "maim", "impale", "brittle", "sapped", "scorch", "slow", "stun",
+            "taunt", "blind", "intimidate", "unnerve", "exposure", "withered",
+            
+            // Helpful Ground Effects
+            "ground_desecration", "desecration", "ground_caustic", "caustic_ground",
+            "ground_burning", "burning_ground", "ground_chilled", "chilled_ground",
+            "ground_shocked", "shocked_ground", "ground_tar", "tar", "ground_ice",
+            "ground_fire", "ground_lightning", "ground_chaos", "ground_poison",
+            "ground_bleed", "ground_corrupted", "ground_volatile", "volatile_ground",
+            
+            // Additional ground effects
+            "ground_effect", "ground_degen", "degen", "damage_over_time", "dot"
+        };
+        
+        // Beneficial Ground Effects
+        private static readonly HashSet<string> BeneficialGroundEffects = new HashSet<string>
+        {
+            "consecrated_ground", "consecrated", "ground_consecrated",
+            "blessed_ground", "blessed", "ground_blessed",
+            "ground_regen", "regeneration_ground", "ground_healing"
+        };
         private string GetText(string english, string russian)
         {
             return Settings.UseEnglish ? english : russian;
@@ -317,6 +362,76 @@ namespace ShowBuffs_PoE2
             {
                 Settings.AddBuff();
             }
+
+            ImGui.Separator();
+            ImGui.Text(GetText("Detected Buffs", "Обнаруженные баффы"));
+            ImGui.SameLine();
+            if (ImGui.Button(GetText("Refresh", "Обновить") + "##RefreshDetectedBuffs"))
+            {
+                UpdateDetectedBuffs();
+            }
+            ImGui.SameLine();
+            bool showAllBuffsWindow = Settings.ShowAllBuffsWindow.Value;
+            if (ImGui.Checkbox(GetText("Show All Buffs Window", "Показать окно всех баффов") + "##ShowAllBuffsWindowCheckbox", ref showAllBuffsWindow))
+            {
+                Settings.ShowAllBuffsWindow.Value = showAllBuffsWindow;
+            }
+            ImGui.SameLine();
+            bool freezeBuffList = Settings.FreezeBuffList.Value;
+            if (ImGui.Checkbox(GetText("Freeze List", "Заморозить список") + "##FreezeBuffListCheckbox", ref freezeBuffList))
+            {
+                Settings.FreezeBuffList.Value = freezeBuffList;
+            }
+            ImGui.TextColored(new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1),
+                GetText("Active buffs on your character. Click + to add to configuration.",
+                  "Активные баффы на вашем персонаже. Нажмите + чтобы добавить в конфигурацию."));
+            
+            if (Settings.FreezeBuffList.Value)
+            {
+                ImGui.TextColored(new System.Numerics.Vector4(1, 0.6f, 0, 1),
+                    GetText("⚠ List is FROZEN - updates stopped", "⚠ Список ЗАМОРОЖЕН - обновления остановлены"));
+            }
+
+            if (GameController.Player != null && GameController.Player.IsValid)
+            {
+                foreach (var buff in _detectedBuffs)
+                {
+                    if (buff?.Name == null) continue;
+
+                    ImGui.Text($"{buff.Name} (");
+                    ImGui.SameLine();
+                    ImGui.TextColored(new System.Numerics.Vector4(0, 1, 0, 1), buff.DisplayName ?? buff.Name);
+                    ImGui.SameLine();
+                    ImGui.Text($") (Stacks: {buff.BuffStacks})");
+                    ImGui.SameLine();
+                    
+                    if (ImGui.Button($"+##DetectedBuff_{buff.Name}"))
+                    {
+                        if (!Settings.BuffSettings.Any(x => x.BuffName.Value == buff.Name))
+                        {
+                            Settings.BuffSettings.Add(new BuffSetting
+                            {
+                                BuffName = new TextNode(buff.Name),
+                                DisplayName = new TextNode(buff.DisplayName ?? buff.Name),
+                                Show = new ToggleNode(true)
+                            });
+                        }
+                    }
+                    
+                    if (IsLikelyDebuff(buff))
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.3f, 0.3f, 1), 
+                            GetText("[DEBUFF]", "[ДЕБАФФ]"));
+                    }
+                    else if (IsBeneficialGroundEffect(buff))
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new System.Numerics.Vector4(0.3f, 1, 0.3f, 1), 
+                            GetText("[BENEFICIAL]", "[ПОЛЕЗНЫЙ]"));
+                    }
+                }
+            }
         }
 
         public override void Render()
@@ -332,6 +447,27 @@ namespace ShowBuffs_PoE2
                 var player = GameController.Player;
                 if (player == null || !player.IsValid)
                     return;
+
+                // Logic to update detected buffs list for the window/settings
+                var currentActiveBuffNames = GetAllActiveBuffs(player)
+                    .Where(b => b?.Name != null)
+                    .Select(b => b.Name)
+                    .ToHashSet();
+
+                if (!Settings.FreezeBuffList.Value)
+                {
+                    if (!_lastKnownActiveBuffNames.SetEquals(currentActiveBuffNames))
+                    {
+                        UpdateDetectedBuffs();
+                        _lastKnownActiveBuffNames = currentActiveBuffNames;
+                    }
+                }
+
+                // Отдельное окно со всеми баффами (независимо от основного худа)
+                if (Settings.ShowAllBuffsWindow.Value)
+                {
+                    DrawAllBuffsWindow();
+                }
 
                 // Получаем позицию персонажа
                 var playerPos = player.Pos;
@@ -505,6 +641,249 @@ namespace ShowBuffs_PoE2
             {
                 LogError($"Ошибка рендеринга баффов: {ex.Message}", 5);
             }
+        }
+        private static bool IsLikelyDebuff(Buff buff)
+        {
+            if (buff?.Name == null) return false;
+            
+            var nameLower = buff.Name.ToLowerInvariant();
+            
+            foreach (var debuffName in KnownDebuffsAndGroundEffects)
+            {
+                if (nameLower.Contains(debuffName))
+                    return true;
+            }
+            
+            if (nameLower.Contains("curse") || nameLower.Contains("debuff") || 
+                nameLower.Contains("afflict") || nameLower.Contains("weaken") ||
+                nameLower.Contains("ground_") || nameLower.Contains("_ground"))
+                return true;
+                
+            return false;
+        }
+
+        private static bool IsBeneficialGroundEffect(Buff buff)
+        {
+            if (buff?.Name == null) return false;
+            
+            var nameLower = buff.Name.ToLowerInvariant();
+            
+            foreach (var beneficialName in BeneficialGroundEffects)
+            {
+                if (nameLower.Contains(beneficialName))
+                    return true;
+            }
+            
+            return false;
+        }
+
+        private List<Buff> GetAllActiveBuffs(Entity player)
+        {
+            var result = new List<Buff>();
+            try
+            {
+                if (player.TryGetComponent<Buffs>(out var buffComp))
+                {
+                    var allBuffs = buffComp.BuffsList ?? new List<Buff>();
+                    
+                    foreach (var buff in allBuffs)
+                    {
+                        if (buff?.Name == null) continue;
+                        result.Add(buff);
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                LogError($"GetAllActiveBuffs error: {e.Message}", 5);
+            }
+            return result;
+        }
+
+        private void UpdateDetectedBuffs()
+        {
+            var player = GameController.Player;
+            if (player == null || !player.IsValid) return;
+
+            var currentActiveBuffs = new List<Buff>();
+            try
+            {
+                if (player.TryGetComponent<Buffs>(out var buffComp))
+                {
+                    var allBuffs = buffComp.BuffsList ?? new List<Buff>();
+                    currentActiveBuffs = allBuffs
+                        .Where(b => b?.Name != null)
+                        .GroupBy(b => b.Name)
+                        .Select(g => g.First())
+                        .ToList();
+                }
+            }
+            catch (Exception e)
+            {
+                LogError($"UpdateDetectedBuffs error: {e.Message}", 5);
+            }
+
+            var filteredDetectedBuffs = _detectedBuffs
+                .Where(existingBuff => currentActiveBuffs.Any(activeBuff => activeBuff.Name == existingBuff.Name))
+                .ToList();
+
+            var newlyActiveBuffs = currentActiveBuffs
+                .Where(activeBuff => !filteredDetectedBuffs.Any(existingBuff => existingBuff.Name == activeBuff.Name))
+                .ToList();
+
+            var combinedBuffs = newlyActiveBuffs.Concat(filteredDetectedBuffs).ToList();
+
+            _detectedBuffs = combinedBuffs
+                .GroupBy(b => b.Name)
+                .Select(g => g.First())
+                .ToList();
+        }
+
+        private void DrawAllBuffsWindow()
+        {
+            var isOpen = Settings.ShowAllBuffsWindow.Value;
+            if (!ImGui.Begin(GetText("All Detected Buffs", "Все обнаруженные баффы"), ref isOpen))
+            {
+                Settings.ShowAllBuffsWindow.Value = isOpen;
+                ImGui.End();
+                return;
+            }
+            Settings.ShowAllBuffsWindow.Value = isOpen;
+
+            ImGui.Text(GetText("All active buffs on your character", "Все активные баффы на вашем персонаже"));
+            ImGui.SameLine();
+            if (ImGui.Button(GetText("Refresh", "Обновить") + "##RefreshAllBuffs"))
+            {
+                UpdateDetectedBuffs();
+            }
+            ImGui.SameLine();
+            bool freezeBuffList = Settings.FreezeBuffList.Value;
+            if (ImGui.Checkbox(GetText("Freeze List", "Заморозить список") + "##FreezeBuffListAllBuffs", ref freezeBuffList))
+            {
+                Settings.FreezeBuffList.Value = freezeBuffList;
+            }
+            
+            ImGui.Separator();
+            
+            ImGui.SetNextItemWidth(200);
+            ImGui.InputTextWithHint("##BuffSearch", GetText("Search...", "Поиск..."), ref _buffSearchFilter, 100);
+            ImGui.SameLine();
+            
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.Combo("##SortMode", ref _buffSortMode, 
+                GetText("Sort: Name\0Sort: Stacks\0Sort: Type\0", "Сортировка: Имя\0Сортировка: Стаки\0Сортировка: Тип\0")))
+            {
+            }
+            
+            ImGui.Separator();
+            
+            ImGui.TextColored(new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1),
+                GetText("Type values shown for each buff. Use for Buff Type Filter in settings.",
+                  "Значения Type показаны для каждого баффа. Используйте для Buff Type Filter в настройках."));
+            ImGui.TextColored(new System.Numerics.Vector4(1, 0.3f, 0.3f, 1),
+                GetText("[DEBUFF] = harmful effect/ground", "[ДЕБАФФ] = вредный эффект/ground"));
+            ImGui.SameLine();
+            ImGui.TextColored(new System.Numerics.Vector4(0.3f, 1, 0.3f, 1),
+                GetText("[BENEFICIAL] = helpful ground", "[ПОЛЕЗНЫЙ] = полезный ground"));
+            
+            if (Settings.FreezeBuffList.Value)
+            {
+                ImGui.TextColored(new System.Numerics.Vector4(1, 0.6f, 0, 1),
+                    GetText("⚠ List is FROZEN - updates stopped", "⚠ Список ЗАМОРОЖЕН - обновления остановлены"));
+            }
+            
+            ImGui.Separator();
+
+            if (GameController.Player != null && GameController.Player.IsValid)
+            {
+                var filteredBuffs = _detectedBuffs.AsEnumerable();
+                
+                if (!string.IsNullOrWhiteSpace(_buffSearchFilter))
+                {
+                    var searchLower = _buffSearchFilter.ToLowerInvariant();
+                    filteredBuffs = filteredBuffs.Where(b => 
+                        b.Name.ToLowerInvariant().Contains(searchLower) || 
+                        (b.DisplayName != null && b.DisplayName.ToLowerInvariant().Contains(searchLower)));
+                }
+                
+                // Sorting logic
+                switch (_buffSortMode)
+                {
+                    case 1: // Stacks
+                        filteredBuffs = filteredBuffs.OrderByDescending(b => b.BuffStacks);
+                        break;
+                    case 2: // Type (Safe access)
+                         // Assuming BuffDefinition might not exist or be different, we handle it safely or skip
+                         // filteredBuffs = filteredBuffs.OrderBy(b => b.BuffDefinition?.Type ?? 0); 
+                         // For now sorting by name as fallback for Type if definition issues arise, 
+                         // but trying to access if available.
+                         filteredBuffs = filteredBuffs.OrderBy(b => b.Name); 
+                        break;
+                    default: // Name
+                        filteredBuffs = filteredBuffs.OrderBy(b => b.Name);
+                        break;
+                }
+                
+                var buffList = filteredBuffs.ToList();
+                
+                ImGui.Text($"{GetText("Total", "Всего")}: {buffList.Count}");
+                ImGui.Separator();
+                
+                ImGui.BeginChild("BuffsList", new System.Numerics.Vector2(0, 0));
+                
+                foreach (var buff in buffList)
+                {
+                    if (buff?.Name == null) continue;
+
+                    ImGui.PushID(buff.Name);
+                    
+                    ImGui.Text($"{buff.Name}");
+                    ImGui.SameLine();
+                    ImGui.TextColored(new System.Numerics.Vector4(0, 1, 0, 1), $"({buff.DisplayName})");
+                    ImGui.SameLine();
+                    ImGui.TextColored(new System.Numerics.Vector4(0.7f, 0.7f, 0.7f, 1), $"Stacks: {buff.BuffStacks}");
+                    
+                    // Button to add buff
+                    var buttonSize = new System.Numerics.Vector2(ImGui.GetFontSize() * 3, ImGui.GetFontSize() * 1.5f);
+                    if (ImGui.Button("+", buttonSize))
+                    {
+                        if (!Settings.BuffSettings.Any(x => x.BuffName.Value == buff.Name))
+                        {
+                            Settings.BuffSettings.Add(new BuffSetting
+                            {
+                                BuffName = new TextNode(buff.Name),
+                                DisplayName = new TextNode(buff.DisplayName ?? buff.Name),
+                                Show = new ToggleNode(true)
+                            });
+                        }
+                    }
+                    
+                    if (IsLikelyDebuff(buff))
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new System.Numerics.Vector4(1, 0.3f, 0.3f, 1), 
+                            GetText("[DEBUFF]", "[ДЕБАФФ]"));
+                    }
+                    else if (IsBeneficialGroundEffect(buff))
+                    {
+                        ImGui.SameLine();
+                        ImGui.TextColored(new System.Numerics.Vector4(0.3f, 1, 0.3f, 1), 
+                            GetText("[BENEFICIAL]", "[ПОЛЕЗНЫЙ]"));
+                    }
+                    
+                    ImGui.PopID();
+                    ImGui.Separator();
+                }
+                
+                ImGui.EndChild();
+            }
+            else
+            {
+                ImGui.TextColored(new System.Numerics.Vector4(1, 0, 0, 1), 
+                    GetText("Player not found or invalid", "Игрок не найден или недоступен"));
+            }
+
+            ImGui.End();
         }
     }
 }
